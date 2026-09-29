@@ -1,0 +1,77 @@
+# ==========================================================
+# Stack Moodle 5.1 UAGRM - Entorno de Practicas (DEDTE)
+# - Moodle en http://localhost:8080
+# - MariaDB en puerto 3307 (sin colision con MySQL Server 8.0)
+# - bd_analitica_ava creada automaticamente en el mismo servidor
+# ==========================================================
+
+services:
+
+  # -------------------------------------------------------
+  # BASE DE DATOS (MariaDB 10.11 - compatible con Moodle 5.1)
+  # -------------------------------------------------------
+  mariadb:
+    image: mariadb:10.11
+    container_name: moodle_uagrm_db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${MARIADB_ROOT_PASSWORD}
+      MARIADB_DATABASE: ${MOODLE_DB_NAME}
+      MARIADB_USER: ${MOODLE_DB_USER}
+      MARIADB_PASSWORD: ${MOODLE_DB_PASSWORD}
+    volumes:
+      - db_data:/var/lib/mysql
+      - ./init-db:/docker-entrypoint-initdb.d:ro
+    ports:
+      - "${MARIADB_EXTERNAL_PORT:-3307}:3306"
+    command: >
+      --character-set-server=utf8mb4
+      --collation-server=utf8mb4_unicode_ci
+      --innodb-buffer-pool-size=256M
+      --max_allowed_packet=128M
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-p${MARIADB_ROOT_PASSWORD}"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 60s
+
+  # -------------------------------------------------------
+  # MOODLE 5.1 APP (Apache + PHP 8.2)
+  # -------------------------------------------------------
+  moodle:
+    image: moodlehq/moodle-php-apache:8.2
+    container_name: moodle_uagrm_app
+    restart: unless-stopped
+    depends_on:
+      mariadb:
+        condition: service_healthy
+    environment:
+      MOODLE_DOCKER_DBTYPE: mariadb
+      MOODLE_DOCKER_DBHOST: ${MOODLE_DB_HOST}
+      MOODLE_DOCKER_DBNAME: ${MOODLE_DB_NAME}
+      MOODLE_DOCKER_DBUSER: ${MOODLE_DB_USER}
+      MOODLE_DOCKER_DBPASS: ${MOODLE_DB_PASSWORD}
+      MOODLE_DOCKER_WWWROOT: ${MOODLE_WWWROOT}
+      MOODLE_DOCKER_PHP_VERSION: 8.2
+    volumes:
+      # Codigo fuente de Moodle 5.1 (clonado desde GitHub)
+      - ./moodle:/var/www/html
+      # Datos de Moodle (archivos subidos, sesiones, cache)
+      - ./moodledata:/var/www/moodledata
+      # Backups accesibles dentro del contenedor
+      - ./backups:/var/www/backups:ro
+      # Optimizacion de PHP para acelerar Docker en Windows
+      - ./custom-php.ini:/usr/local/etc/php/conf.d/99-custom.ini:ro
+    ports:
+      - "${MOODLE_PORT:-8080}:80"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost/login/index.php"]
+      interval: 30s
+      timeout: 10s
+      retries: 15
+      start_period: 120s
+
+volumes:
+  db_data:
+    driver: local
